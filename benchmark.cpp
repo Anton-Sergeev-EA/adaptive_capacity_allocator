@@ -1,10 +1,11 @@
-#include "adaptive_allocator.hpp"
-#include <vector>
 #include <chrono>
-#include <iostream>
 #include <iomanip>
-#include <string>
+#include <iostream>
 #include <numeric>
+#include <string>
+#include <vector>
+
+#include "adaptive_allocator.hpp"
 
 using namespace adaptive;
 
@@ -44,11 +45,9 @@ void benchmark_insertions(const std::string& name, int elements) {
 
     const double overhead = static_cast<double>(vec.capacity()) / vec.size();
 
-    std::cout << std::left << std::setw(22) << name
-              << "| Execution Time: " << std::setw(8) << (static_cast<double>(elapsed) / 1000.0) << " ms "
-              << "| Memory Overhead (Cap/Size): " << std::fixed << std::setprecision(3) << overhead
-              << "| Final Capacity: " << vec.capacity()
-              << std::endl;
+    std::cout << std::left << std::setw(22) << name << "| Execution Time: " << std::setw(8)
+              << (static_cast<double>(elapsed) / 1000.0) << " ms " << "| Memory Overhead (Cap/Size): " << std::fixed
+              << std::setprecision(3) << overhead << "| Final Capacity: " << vec.capacity() << std::endl;
 }
 
 /**
@@ -73,11 +72,9 @@ void benchmark_burst_load(const std::string& name, int total_elements, int burst
 
     const double overhead = static_cast<double>(vec.capacity()) / vec.size();
 
-    std::cout << std::left << std::setw(22) << (name + " (Burst)")
-              << "| Execution Time: " << std::setw(8) << (static_cast<double>(elapsed) / 1000.0) << " ms "
-              << "| Memory Overhead (Cap/Size): " << std::fixed << std::setprecision(3) << overhead
-              << " | Final Capacity: " << vec.capacity()
-              << std::endl;
+    std::cout << std::left << std::setw(22) << (name + " (Burst)") << "| Execution Time: " << std::setw(8)
+              << (static_cast<double>(elapsed) / 1000.0) << " ms " << "| Memory Overhead (Cap/Size): " << std::fixed
+              << std::setprecision(3) << overhead << " | Final Capacity: " << vec.capacity() << std::endl;
 }
 
 int main() {

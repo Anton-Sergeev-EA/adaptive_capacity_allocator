@@ -1,11 +1,12 @@
-#include "adaptive_allocator.hpp"
-#include <iostream>
 #include <cassert>
 #include <chrono>
+#include <exception>
+#include <future>
+#include <iostream>
 #include <thread>
 #include <vector>
-#include <future>
-#include <exception>
+
+#include "adaptive_allocator.hpp"
 
 using namespace adaptive;
 
@@ -42,8 +43,7 @@ void test_growth_strategy_switch() {
     auto telemetry = std::make_shared<allocation_telemetry>(
         /*shrink_idle_ms=*/1000,
         /*history_window_ms=*/50,
-        /*high_threshold=*/500.0f
-    );
+        /*high_threshold=*/500.0f);
 
     adaptive_vector<int> vec(telemetry);
 
@@ -82,7 +82,7 @@ void test_memory_safety() {
     vec2 = std::move(vec1);
 
     assert(vec2.size() == kSampleCount);
-    assert(vec1.size() == 0); // NOLINT: explicitly verifying moved-from container state
+    assert(vec1.size() == 0);  // NOLINT: explicitly verifying moved-from container state
 
     for (int i = 0; i < kSampleCount; ++i) {
         assert(vec2[i] == i);
