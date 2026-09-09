@@ -71,7 +71,7 @@ endif()
 
 # 3. Microbenchmarks Target.
 if(ADAPTIVE_BUILD_BENCHMARKS)
-    add_executable(adaptive_benchmark benchmark_adaptive_allocator.cpp)
+    add_executable(adaptive_benchmark benchmark.cpp)
     target_link_libraries(adaptive_benchmark PRIVATE adaptive::allocator)
     apply_strict_compile_options(adaptive_benchmark "O3")
 endif()
