@@ -13,7 +13,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Build Options.
 option(ADAPTIVE_BUILD_TESTS "Build unit tests suite" ON)
 option(ADAPTIVE_BUILD_BENCHMARKS "Build performance benchmarks" ON)
-option(ADAPTIVE_ENABLE_SANITIZERS "Enable Address and Thread Sanitizers for debugging" OFF)
+
+# ASan and TSan instrument incompatible things (shadow memory vs. happens-before
+# tracking) and cannot be linked into the same binary - GCC/Clang both hard-error
+# on -fsanitize=address,thread. Since this library's whole point is concurrent
+# telemetry (a background worker thread plus a shared_ptr<allocation_telemetry>
+# used across threads), both sanitizers are genuinely useful here, just not at
+# the same time, so this is a tri-state choice rather than one on/off switch.
+set(ADAPTIVE_SANITIZER "none" CACHE STRING "Sanitizer build: none, address (ASan+UBSan), or thread (TSan+UBSan)")
+set_property(CACHE ADAPTIVE_SANITIZER PROPERTY STRINGS none address thread)
 
 # Required Dependencies.
 find_package(Threads REQUIRED)
@@ -52,9 +60,23 @@ function(apply_strict_compile_options TARGET_NAME OPTIMIZATION_LEVEL)
         )
     endif()
 
-    if(ADAPTIVE_ENABLE_SANITIZERS AND NOT MSVC)
-        target_compile_options(${TARGET_NAME} PRIVATE -fsanitize=address,thread,undefined -g)
-        target_link_options(${TARGET_NAME} PRIVATE -fsanitize=address,thread,undefined)
+    if(NOT MSVC AND NOT ADAPTIVE_SANITIZER STREQUAL "none")
+        if(ADAPTIVE_SANITIZER STREQUAL "address")
+            set(_adaptive_sanitize_flags -fsanitize=address,undefined)
+        elseif(ADAPTIVE_SANITIZER STREQUAL "thread")
+            # UBSan deliberately left out here: GCC's UBSan runtime calls
+            # __sanitizer::IsAccessibleMemoryRange() (a pipe()-based pointer
+            # probe) in a way that is not coordinated with ThreadSanitizer's
+            # own interceptors, producing races reported entirely inside
+            # libtsan/libubsan/libstdc++ - not in this project's code - when
+            # both are loaded together. UBSan coverage is still exercised via
+            # the "address" sanitizer mode above.
+            set(_adaptive_sanitize_flags -fsanitize=thread)
+        else()
+            message(FATAL_ERROR "ADAPTIVE_SANITIZER must be one of: none, address, thread (got '${ADAPTIVE_SANITIZER}')")
+        endif()
+        target_compile_options(${TARGET_NAME} PRIVATE ${_adaptive_sanitize_flags} -g)
+        target_link_options(${TARGET_NAME} PRIVATE ${_adaptive_sanitize_flags})
     endif()
 endfunction()
 
