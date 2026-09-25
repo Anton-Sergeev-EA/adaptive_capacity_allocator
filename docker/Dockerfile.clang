@@ -1,0 +1,18 @@
+# Task 2: build, test and run the project with Clang.
+FROM ubuntu:24.04 AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clang cmake make \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY CMakeLists.txt adaptive_allocator.hpp test_adaptive_allocator.cpp benchmark.cpp ./
+RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ \
+ && cmake --build build -j"$(nproc)" \
+ && ctest --test-dir build --output-on-failure
+
+FROM ubuntu:24.04
+# Clang links against libstdc++, which is already in the base image.
+COPY --from=build /src/build/adaptive_tests /src/build/adaptive_benchmark /app/
+COPY docker/entrypoint.sh /app/entrypoint.sh
+ENV COMPILER=clang
+WORKDIR /app
+ENTRYPOINT ["/app/entrypoint.sh"]

@@ -231,12 +231,24 @@ class adaptive_allocator {
     void deallocate(T* ptr, size_type n) noexcept {
         if (!ptr) return;
 
+        // Sized deallocation is optional: GCC enables it by default for C++14+,
+        // but Clang < 19 only does with -fsized-deallocation. Use the
+        // feature-test macro so the header builds on both compilers.
+#if defined(__cpp_sized_deallocation) && __cpp_sized_deallocation >= 201309L
         std::size_t bytes = n * sizeof(T);
         if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
             ::operator delete(ptr, bytes, std::align_val_t(alignof(T)));
         } else {
             ::operator delete(ptr, bytes);
         }
+#else
+        (void)n;
+        if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
+            ::operator delete(ptr, std::align_val_t(alignof(T)));
+        } else {
+            ::operator delete(ptr);
+        }
+#endif
     }
 
     [[nodiscard]] std::shared_ptr<allocation_telemetry> get_telemetry() const noexcept { return m_telemetry; }
