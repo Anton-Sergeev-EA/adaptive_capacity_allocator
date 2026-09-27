@@ -14,6 +14,7 @@ else()
 endif()
 
 option(ADAPTIVE_BUILD_TESTS "Build the unit tests" ${ADAPTIVE_IS_TOP_LEVEL})
+option(ADAPTIVE_INSTALL "Generate install and package-config rules" ${ADAPTIVE_IS_TOP_LEVEL})
 
 # ASan and TSan cannot be linked into one binary, so this is a three-way choice.
 set(ADAPTIVE_SANITIZER "none" CACHE STRING "Sanitizer build: none, address (ASan+UBSan) or thread (TSan)")
@@ -75,3 +76,28 @@ if(ADAPTIVE_BUILD_TESTS)
     add_test(NAME adaptive_tests COMMAND adaptive_tests)
 endif()
 
+# ---------------------------------------------------------------------------
+# Install + find_package(AdaptiveAllocator) support
+# ---------------------------------------------------------------------------
+if(ADAPTIVE_INSTALL)
+    include(CMakePackageConfigHelpers)
+
+    install(DIRECTORY include/adaptive DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(TARGETS adaptive_allocator EXPORT AdaptiveAllocatorTargets)
+    install(EXPORT AdaptiveAllocatorTargets
+        NAMESPACE adaptive::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AdaptiveAllocator)
+
+    configure_package_config_file(cmake/AdaptiveAllocatorConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/AdaptiveAllocatorConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AdaptiveAllocator)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/AdaptiveAllocatorConfigVersion.cmake
+        COMPATIBILITY SameMajorVersion
+        ARCH_INDEPENDENT)
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/AdaptiveAllocatorConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/AdaptiveAllocatorConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AdaptiveAllocator)
+
+endif()
