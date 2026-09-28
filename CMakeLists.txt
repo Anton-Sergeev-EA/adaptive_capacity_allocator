@@ -14,6 +14,7 @@ else()
 endif()
 
 option(ADAPTIVE_BUILD_TESTS "Build the unit tests" ${ADAPTIVE_IS_TOP_LEVEL})
+option(ADAPTIVE_BUILD_APPS "Build the multilingual acalloc demo and adaptive_benchmark" ${ADAPTIVE_IS_TOP_LEVEL})
 option(ADAPTIVE_INSTALL "Generate install and package-config rules" ${ADAPTIVE_IS_TOP_LEVEL})
 
 # ASan and TSan cannot be linked into one binary, so this is a three-way choice.
@@ -77,6 +78,35 @@ if(ADAPTIVE_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Multilingual command-line tools
+# ---------------------------------------------------------------------------
+if(ADAPTIVE_BUILD_APPS)
+    add_library(acalloc_i18n STATIC apps/i18n.cpp)
+    target_include_directories(acalloc_i18n PUBLIC apps)
+    adaptive_strict_target(acalloc_i18n)
+
+    add_executable(acalloc apps/acalloc.cpp)
+    target_link_libraries(acalloc PRIVATE adaptive::allocator acalloc_i18n)
+    adaptive_strict_target(acalloc)
+
+    # v1 name, kept for scripts and Docker images: same program, "bench" by default.
+    add_executable(adaptive_benchmark apps/acalloc.cpp)
+    target_link_libraries(adaptive_benchmark PRIVATE adaptive::allocator acalloc_i18n)
+    target_compile_definitions(adaptive_benchmark PRIVATE ACALLOC_DEFAULT_COMMAND="bench")
+    adaptive_strict_target(adaptive_benchmark)
+
+    if(ADAPTIVE_BUILD_TESTS)
+        foreach(lang ru en zh hi es fr de it)
+            add_test(NAME acalloc_help_${lang} COMMAND acalloc --lang ${lang} --help)
+            add_test(NAME acalloc_languages_${lang} COMMAND acalloc languages --lang=${lang})
+        endforeach()
+        add_test(NAME acalloc_bad_language COMMAND acalloc --lang xx)
+        set_tests_properties(acalloc_bad_language PROPERTIES WILL_FAIL TRUE)
+        add_test(NAME acalloc_demo_small COMMAND acalloc demo --elements 20000)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Install + find_package(AdaptiveAllocator) support
 # ---------------------------------------------------------------------------
 if(ADAPTIVE_INSTALL)
@@ -100,4 +130,7 @@ if(ADAPTIVE_INSTALL)
         ${CMAKE_CURRENT_BINARY_DIR}/AdaptiveAllocatorConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/AdaptiveAllocator)
 
+    if(ADAPTIVE_BUILD_APPS)
+        install(TARGETS acalloc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
 endif()
