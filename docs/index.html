@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--PAGE-START-->
+<title>Adaptive Capacity Allocator</title>
+<meta name="description" content="C++17 header-only container whose growth factor adapts to the measured insertion rate.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a memory-map instrument. Live simulator up top, then mechanism, cost, and integration in one narrow reading column. */
+:root {
+  --bg: #eef1f4;
+  --panel: #ffffff;
+  --ink: #15202b;
+  --muted: #5a6878;
+  --line: #d3dae2;
+  --accent: #2b59c3;        /* adaptive_vector */
+  --std: #b9721a;           /* std::vector */
+  --s-aggr: #c2456b;
+  --s-mod: #23867c;
+  --s-cons: #2b59c3;
+  --code-bg: #e3e8ee;
+  --f-display: "Unbounded", "IBM Plex Sans", "Noto Sans Devanagari", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Noto Sans Devanagari", "Nirmala UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1620; --panel: #16202c; --ink: #e3e8ee; --muted: #93a1b1; --line: #2a3644;
+    --accent: #7fa2ff; --std: #e6a54a; --s-aggr: #f07a9c; --s-mod: #4cc2b5; --s-cons: #7fa2ff; --code-bg: #1c2836;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1620; --panel: #16202c; --ink: #e3e8ee; --muted: #93a1b1; --line: #2a3644;
+  --accent: #7fa2ff; --std: #e6a54a; --s-aggr: #f07a9c; --s-mod: #4cc2b5; --s-cons: #7fa2ff; --code-bg: #1c2836;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.6 var(--f-body); }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 0 48px; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-block: 18px; border-bottom: 1px solid var(--line); }
+.brand { font: 600 13px/1 var(--f-mono); letter-spacing: .02em; display: flex; align-items: center; gap: 10px; }
+.brand .mark { display: inline-grid; grid-template-columns: repeat(5, 5px); gap: 2px; }
+.brand .mark i { height: 14px; background: var(--accent); border-radius: 1px; }
+.brand .mark i:nth-child(n+4) { background: transparent; outline: 1px solid var(--accent); outline-offset: -1px; }
+.top-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+select, button { font: 500 14px/1 var(--f-body); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.ghlink { font: 500 14px/1 var(--f-body); color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; background: var(--panel); }
+
+.hero { padding-block: 40px 20px; display: grid; gap: 14px; }
+.kicker { font: 600 12px/1 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 700 clamp(28px, 5vw, 48px)/1.08 var(--f-display); margin: 0; letter-spacing: -.01em; text-wrap: balance; max-width: 22ch; }
+.tagline { font-size: clamp(17px, 2.2vw, 20px); color: var(--muted); margin: 0; max-width: 60ch; }
+
+.sim { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: grid; gap: 16px; margin-top: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field label, .lbl { font: 600 11px/1.2 var(--f-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 3px; }
+.seg button { border: 0; background: transparent; padding: 8px 11px; border-radius: 6px; font-size: 14px; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--accent); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+input[type=range] { width: 200px; max-width: 100%; accent-color: var(--accent); }
+.nval { font: 600 14px/1 var(--f-mono); font-variant-numeric: tabular-nums; }
+.wdesc { color: var(--muted); font-size: 14px; margin: 0; }
+
+.chart-box { position: relative; width: 100%; }
+canvas { width: 100%; height: 300px; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
+.sw.dash { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 7px); height: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tile { background: var(--panel); padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
+.tile .row { display: flex; justify-content: space-between; gap: 10px; font: 600 15px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.tile .row .who { font: 500 13px/1.2 var(--f-mono); }
+.who.ad { color: var(--accent); } .who.sd { color: var(--std); }
+.simnote { font-size: 13px; color: var(--muted); margin: 0; }
+
+section { padding-block: 44px 0; display: grid; gap: 16px; }
+h2 { font: 700 clamp(20px, 3vw, 26px)/1.2 var(--f-display); margin: 0; text-wrap: balance; }
+.lead { margin: 0; max-width: 68ch; color: var(--muted); }
+.strats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.strat { border-top: 3px solid var(--c); padding-top: 12px; display: grid; gap: 6px; min-width: 0; }
+.strat .f { font: 700 30px/1 var(--f-display); color: var(--c); }
+.strat h3 { margin: 0; font: 600 17px/1.3 var(--f-body); }
+.strat p { margin: 0; color: var(--muted); font-size: 15px; }
+.feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 24px; }
+.feat h3 { margin: 0 0 4px; font: 600 16px/1.3 var(--f-body); }
+.feat p { margin: 0; color: var(--muted); font-size: 15px; }
+.trade { max-width: 68ch; margin: 0; }
+
+.code { position: relative; background: var(--code-bg); border-radius: 8px; min-width: 0; }
+.code pre { margin: 0; padding: 14px 16px; overflow-x: auto; font: 400 13.5px/1.55 var(--f-mono); }
+.code .copy { position: absolute; top: 8px; right: 8px; padding: 6px 9px; font-size: 12px; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.steps > div { display: grid; gap: 8px; min-width: 0; align-content: start; }
+
+footer { margin-top: 56px; padding-block: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+@media (max-width: 520px) { canvas { height: 240px; } .sim { padding: 14px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<!--PAGE-HEAD-END-->
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>adaptive_capacity_allocator</div>
+    <div class="top-right">
+      <label class="lbl" for="lang" data-i18n="lang_label">Язык</label>
+      <select id="lang"></select>
+      <a class="ghlink" href="https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="kicker">C++17 · header-only · MIT · v2.0.0</div>
+    <h1 data-i18n="title"></h1>
+    <p class="tagline" data-i18n="tagline"></p>
+
+    <div class="sim" aria-labelledby="sim-h">
+      <div class="controls">
+        <div class="field">
+          <span class="lbl" id="sim-h" data-i18n="workload"></span>
+          <div class="seg" id="workloads" role="group"></div>
+        </div>
+        <div class="field">
+          <label for="count"><span data-i18n="elements"></span>: <span class="nval" id="countv"></span></label>
+          <input type="range" id="count" min="0" max="100" step="1" value="68">
+        </div>
+        <button class="primary" id="run" data-i18n="run"></button>
+      </div>
+      <p class="wdesc" id="wdesc"></p>
+      <div class="chart-box"><canvas id="chart" aria-label="chart" role="img"></canvas></div>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--std)"></i>std::vector</span>
+        <span><i class="sw" style="background:var(--accent)"></i>adaptive_vector</span>
+        <span><i class="sw dash"></i><span data-i18n="legend_size"></span></span>
+        <span><i class="sw" style="background:var(--s-aggr)"></i><span data-i18n="s_aggr"></span></span>
+        <span><i class="sw" style="background:var(--s-mod)"></i><span data-i18n="s_mod"></span></span>
+        <span><i class="sw" style="background:var(--s-cons)"></i><span data-i18n="s_cons"></span></span>
+      </div>
+      <div class="tiles" id="tiles"></div>
+      <p class="simnote" data-i18n="simnote"></p>
+    </div>
+  </div>
+
+  <section>
+    <h2 data-i18n="how_title"></h2>
+    <p class="lead" data-i18n="how_lead"></p>
+    <div class="strats">
+      <div class="strat" style="--c:var(--s-aggr)"><div class="f">×2.0</div><h3 data-i18n="s_aggr"></h3><p data-i18n="s_aggr_d"></p></div>
+      <div class="strat" style="--c:var(--s-mod)"><div class="f">×1.5</div><h3 data-i18n="s_mod"></h3><p data-i18n="s_mod_d"></p></div>
+      <div class="strat" style="--c:var(--s-cons)"><div class="f">×1.1</div><h3 data-i18n="s_cons"></h3><p data-i18n="s_cons_d"></p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="feat_title"></h2>
+    <div class="feats">
+      <div class="feat"><h3 data-i18n="f1"></h3><p data-i18n="f1d"></p></div>
+      <div class="feat"><h3 data-i18n="f2"></h3><p data-i18n="f2d"></p></div>
+      <div class="feat"><h3 data-i18n="f3"></h3><p data-i18n="f3d"></p></div>
+      <div class="feat"><h3 data-i18n="f4"></h3><p data-i18n="f4d"></p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2 data-i18n="trade_title"></h2>
+    <p class="trade" data-i18n="trade"></p>
+  </section>
+
+  <section>
+    <h2 data-i18n="start_title"></h2>
+    <div class="steps">
+      <div><span class="lbl" data-i18n="st_cmake"></span>
+        <div class="code"><button class="copy" data-i18n="copy"></button><pre><code>include(FetchContent)
+FetchContent_Declare(adaptive_allocator
+  GIT_REPOSITORY https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator.git
+  GIT_TAG v2.0.0)
+FetchContent_MakeAvailable(adaptive_allocator)
+
+target_link_libraries(app PRIVATE adaptive::allocator)</code></pre></div></div>
+      <div><span class="lbl" data-i18n="st_code"></span>
+        <div class="code"><button class="copy" data-i18n="copy"></button><pre><code>#include &lt;adaptive/adaptive_allocator.hpp&gt;
+
+adaptive::adaptive_vector&lt;int&gt; v;
+for (int i = 0; i &lt; 1'000'000; ++i)
+    v.push_back(i);
+
+auto s = v.stats();  // capacity, reallocations,
+                     // last_strategy, last_rate</code></pre></div></div>
+      <div><span class="lbl" data-i18n="st_cli"></span>
+        <div class="code"><button class="copy" data-i18n="copy"></button><pre><code id="clicode">cmake -S . -B build &amp;&amp; cmake --build build
+./build/acalloc --lang ru
+./build/acalloc bench --lang ru</code></pre></div></div>
+    </div>
+  </section>
+
+  <footer>
+    <span data-i18n="footer"></span>
+    <span>avsergeev1981@gmail.com</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+const LANGS = [
+  ["ru","Русский"],["en","English"],["zh","中文"],["hi","हिन्दी"],
+  ["es","Español"],["fr","Français"],["de","Deutsch"],["it","Italiano"]
+];
+const T = {
+ru: {
+  lang_label:"Язык", title:"Адаптивный распределитель ёмкости",
+  tagline:"Контейнер C++, который сам выбирает, насколько расти: при плотном потоке вставок бережёт память, при редких — растёт так же быстро, как std::vector.",
+  workload:"Нагрузка", elements:"Элементов", run:"Запустить",
+  w_steady:"Непрерывный поток", w_bursts:"Всплески", w_trickle:"Ручеёк", w_pause:"Поток с паузой",
+  wd_steady:"Миллионы вставок в секунду без перерыва, как при загрузке большого файла.",
+  wd_bursts:"Пачки по 5 000 элементов с паузами 2 мс, как пакеты сетевых сообщений.",
+  wd_trickle:"Около 500 вставок в секунду, как журнал событий небольшого сервиса.",
+  wd_pause:"Плотный поток, пауза 2 с, затем редкие вставки (20 в секунду). После простоя контейнер снова растёт агрессивно, как std::vector.",
+  legend_size:"заполнено", axis_x:"вставлено элементов", axis_y:"ёмкость",
+  band:"стратегия adaptive_vector",
+  t_avg:"Средний запас памяти", t_final:"Итоговая ёмкость", t_realloc:"Перераспределений", t_copies:"Скопировано элементов",
+  simnote:"Симуляция выполняет тот же алгоритм, что и библиотека, на модельном времени. Реальные замеры на вашем компьютере покажет acalloc bench.",
+  how_title:"Как выбирается рост",
+  how_lead:"Каждый раз, когда буфер заполнен, контейнер смотрит, с какой скоростью в него вставляли элементы, и выбирает коэффициент роста. Часы опрашиваются раз в 64 вставки, поэтому горячий путь push_back почти не дороже обычного.",
+  s_aggr:"Агрессивная", s_mod:"Умеренная", s_cons:"Консервативная",
+  s_aggr_d:"До 100 вставок/с, первая вставка после простоя дольше 1 с и любые буферы меньше 1 024 элементов. Как у std::vector: минимум перераспределений.",
+  s_mod_d:"От 100 до 1 000 вставок/с. Компромисс между скоростью и памятью.",
+  s_cons_d:"Больше 1 000 вставок/с. Буфер растёт на 10 %, поэтому лишней памяти остаётся не больше 10 %.",
+  feat_title:"Что внутри",
+  f1:"Без фоновых потоков", f1d:"Ни одного служебного потока: десять тысяч векторов стоят столько же, сколько десять тысяч std::vector.",
+  f2:"Один заголовочный файл", f2d:"Только стандартная библиотека C++17. Подключение через CMake, find_package или простым копированием.",
+  f3:"Общая телеметрия", f3d:"Несколько контейнеров из разных потоков могут делить один счётчик скорости без блокировок.",
+  f4:"Настраиваемая политика", f4d:"Коэффициенты, пороги скорости, окно измерения и порог простоя задаются в growth_policy.",
+  trade_title:"Цена экономии",
+  trade:"Рост на 10 % вместо удвоения означает больше перераспределений и копирований. На непрерывном потоке из миллиона int контейнер медленнее std::vector примерно в 2–3 раза, зато средний запас памяти около 5 % вместо 35–50 %. Если важнее память, чем пропускная способность, это выгодный обмен; если нет, оставьте std::vector.",
+  start_title:"Подключение", st_cmake:"CMake", st_code:"Код", st_cli:"Демо в терминале на вашем языке",
+  copy:"Копировать", copied:"Скопировано", vs:"против",
+  footer:"Лицензия MIT · Антон Сергеев"
+},
+en: {
+  lang_label:"Language", title:"Adaptive Capacity Allocator",
+  tagline:"A C++ container that decides how much to grow: under a dense insertion stream it saves memory, with rare insertions it grows as fast as std::vector.",
+  workload:"Workload", elements:"Elements", run:"Run",
+  w_steady:"Continuous stream", w_bursts:"Bursts", w_trickle:"Trickle", w_pause:"Stream with a pause",
+  wd_steady:"Millions of insertions per second without a break, like loading a large file.",
+  wd_bursts:"Batches of 5,000 elements with 2 ms pauses, like network message packets.",
+  wd_trickle:"About 500 insertions per second, like the event log of a small service.",
+  wd_pause:"A dense stream, a 2 s pause, then rare insertions (20 per second). After the idle period the container grows aggressively again, like std::vector.",
+  legend_size:"filled", axis_x:"elements inserted", axis_y:"capacity",
+  band:"adaptive_vector strategy",
+  t_avg:"Average spare memory", t_final:"Final capacity", t_realloc:"Reallocations", t_copies:"Elements copied",
+  simnote:"The simulation runs the library's own algorithm on modelled time. For real measurements on your machine, run acalloc bench.",
+  how_title:"How growth is chosen",
+  how_lead:"Every time the buffer is full, the container looks at how fast elements were inserted and picks a growth factor. The clock is read once per 64 insertions, so the push_back hot path costs almost nothing extra.",
+  s_aggr:"Aggressive", s_mod:"Moderate", s_cons:"Conservative",
+  s_aggr_d:"Up to 100 insertions/s, the first insertion after more than 1 s idle, and any buffer under 1,024 elements. Same as std::vector: fewest reallocations.",
+  s_mod_d:"100 to 1,000 insertions/s. A balance between speed and memory.",
+  s_cons_d:"Above 1,000 insertions/s. The buffer grows by 10 %, so at most 10 % of it is ever unused.",
+  feat_title:"What's inside",
+  f1:"No background threads", f1d:"Not a single helper thread: ten thousand vectors cost the same as ten thousand std::vectors.",
+  f2:"A single header", f2d:"Only the C++17 standard library. Use it via CMake, find_package, or by copying the file.",
+  f3:"Shared telemetry", f3d:"Several containers on different threads can share one lock-free rate tracker.",
+  f4:"Tunable policy", f4d:"Factors, rate thresholds, measurement window and idle threshold are all set in growth_policy.",
+  trade_title:"The price of saving memory",
+  trade:"Growing by 10 % instead of doubling means more reallocations and copies. On a continuous stream of a million ints the container is roughly 2–3× slower than std::vector, while average spare memory is about 5 % instead of 35–50 %. If memory matters more than throughput, that is a good trade; if not, keep std::vector.",
+  start_title:"Getting started", st_cmake:"CMake", st_code:"Code", st_cli:"Terminal demo in your language",
+  copy:"Copy", copied:"Copied", vs:"vs",
+  footer:"MIT License · Anton Sergeev"
+},
+zh: {
+  lang_label:"语言", title:"自适应容量分配器",
+  tagline:"一个自己决定增长幅度的 C++ 容器：插入密集时节省内存，插入稀少时像 std::vector 一样快速增长。",
+  workload:"负载", elements:"元素数量", run:"运行",
+  w_steady:"连续插入", w_bursts:"突发", w_trickle:"缓慢插入", w_pause:"带停顿的插入",
+  wd_steady:"每秒数百万次插入、不间断，就像加载一个大文件。",
+  wd_bursts:"每批 5,000 个元素，批次之间停顿 2 毫秒，就像网络消息包。",
+  wd_trickle:"每秒约 500 次插入，就像小型服务的事件日志。",
+  wd_pause:"密集插入，停顿 2 秒，然后是稀少的插入（每秒 20 次）。空闲之后容器重新像 std::vector 一样激进增长。",
+  legend_size:"已填充", axis_x:"已插入元素", axis_y:"容量",
+  band:"adaptive_vector 策略",
+  t_avg:"平均冗余内存", t_final:"最终容量", t_realloc:"重新分配次数", t_copies:"复制的元素",
+  simnote:"模拟在模型时间上运行与库完全相同的算法。要在你的机器上实际测量，请运行 acalloc bench。",
+  how_title:"如何选择增长幅度",
+  how_lead:"每当缓冲区满时，容器会查看元素插入的速度并选择增长因子。时钟每 64 次插入才读取一次，因此 push_back 的热路径几乎没有额外开销。",
+  s_aggr:"激进", s_mod:"适中", s_cons:"保守",
+  s_aggr_d:"每秒不超过 100 次插入、空闲超过 1 秒后的第一次插入，以及任何小于 1,024 个元素的缓冲区。与 std::vector 相同：重新分配最少。",
+  s_mod_d:"每秒 100 到 1,000 次插入。在速度和内存之间取得平衡。",
+  s_cons_d:"每秒超过 1,000 次插入。缓冲区每次增长 10%，因此未使用的部分最多 10%。",
+  feat_title:"内部特性",
+  f1:"没有后台线程", f1d:"不创建任何辅助线程：一万个向量的开销与一万个 std::vector 相同。",
+  f2:"单个头文件", f2d:"只依赖 C++17 标准库。可通过 CMake、find_package 或直接复制文件使用。",
+  f3:"共享遥测", f3d:"不同线程中的多个容器可以无锁地共享同一个速率统计。",
+  f4:"可调策略", f4d:"增长因子、速率阈值、测量窗口和空闲阈值都在 growth_policy 中设置。",
+  trade_title:"节省内存的代价",
+  trade:"每次增长 10% 而不是翻倍，意味着更多的重新分配和复制。在连续插入一百万个 int 时，容器比 std::vector 慢约 2–3 倍，但平均冗余内存约为 5%，而不是 35–50%。如果内存比吞吐量更重要，这很划算；否则请继续使用 std::vector。",
+  start_title:"快速开始", st_cmake:"CMake", st_code:"代码", st_cli:"用你的语言运行终端演示",
+  copy:"复制", copied:"已复制", vs:"对",
+  footer:"MIT 许可证 · Anton Sergeev"
+},
+hi: {
+  lang_label:"भाषा", title:"अनुकूली क्षमता आवंटक",
+  tagline:"एक C++ कंटेनर जो खुद तय करता है कि कितना बढ़ना है: घने इंसर्शन प्रवाह में मेमोरी बचाता है, और कम इंसर्शन पर std::vector जितनी तेज़ी से बढ़ता है।",
+  workload:"लोड", elements:"तत्व", run:"चलाएँ",
+  w_steady:"लगातार प्रवाह", w_bursts:"विस्फोट", w_trickle:"धीमी धारा", w_pause:"विराम वाला प्रवाह",
+  wd_steady:"बिना रुके प्रति सेकंड लाखों इंसर्शन, जैसे कोई बड़ी फ़ाइल लोड करना।",
+  wd_bursts:"5,000 तत्वों के बैच, बीच में 2 ms का विराम, जैसे नेटवर्क संदेशों के पैकेट।",
+  wd_trickle:"प्रति सेकंड लगभग 500 इंसर्शन, जैसे किसी छोटी सेवा का इवेंट लॉग।",
+  wd_pause:"घना प्रवाह, 2 सेकंड का विराम, फिर कभी-कभार इंसर्शन (प्रति सेकंड 20)। निष्क्रियता के बाद कंटेनर फिर से std::vector की तरह आक्रामक रूप से बढ़ता है।",
+  legend_size:"भरा हुआ", axis_x:"डाले गए तत्व", axis_y:"क्षमता",
+  band:"adaptive_vector रणनीति",
+  t_avg:"औसत अतिरिक्त मेमोरी", t_final:"अंतिम क्षमता", t_realloc:"पुनः आवंटन", t_copies:"कॉपी किए गए तत्व",
+  simnote:"यह सिमुलेशन मॉडल किए गए समय पर लाइब्रेरी का वही एल्गोरिदम चलाता है। अपनी मशीन पर वास्तविक माप के लिए acalloc bench चलाएँ।",
+  how_title:"वृद्धि कैसे चुनी जाती है",
+  how_lead:"जब भी बफ़र भर जाता है, कंटेनर देखता है कि तत्व कितनी तेज़ी से डाले गए और वृद्धि गुणांक चुनता है। घड़ी हर 64 इंसर्शन पर एक बार पढ़ी जाती है, इसलिए push_back का हॉट पाथ लगभग उतना ही सस्ता रहता है।",
+  s_aggr:"आक्रामक", s_mod:"संतुलित", s_cons:"सतर्क",
+  s_aggr_d:"100 इंसर्शन/से तक, 1 सेकंड से अधिक निष्क्रियता के बाद पहला इंसर्शन, और 1,024 तत्वों से छोटा कोई भी बफ़र। std::vector जैसा: सबसे कम पुनः आवंटन।",
+  s_mod_d:"100 से 1,000 इंसर्शन/से। गति और मेमोरी के बीच संतुलन।",
+  s_cons_d:"1,000 इंसर्शन/से से अधिक। बफ़र 10% बढ़ता है, इसलिए अधिकतम 10% हिस्सा ही खाली रहता है।",
+  feat_title:"अंदर क्या है",
+  f1:"कोई बैकग्राउंड थ्रेड नहीं", f1d:"एक भी सहायक थ्रेड नहीं: दस हज़ार वेक्टर की लागत दस हज़ार std::vector जितनी ही है।",
+  f2:"एक ही हेडर फ़ाइल", f2d:"केवल C++17 मानक लाइब्रेरी। CMake, find_package या फ़ाइल कॉपी करके उपयोग करें।",
+  f3:"साझा टेलीमेट्री", f3d:"अलग-अलग थ्रेड के कई कंटेनर बिना लॉक के एक ही दर ट्रैकर साझा कर सकते हैं।",
+  f4:"समायोज्य नीति", f4d:"गुणांक, दर सीमाएँ, माप विंडो और निष्क्रियता सीमा growth_policy में सेट होती हैं।",
+  trade_title:"मेमोरी बचत की कीमत",
+  trade:"दोगुना होने के बजाय 10% बढ़ने का अर्थ है अधिक पुनः आवंटन और कॉपी। दस लाख int के लगातार प्रवाह पर कंटेनर std::vector से लगभग 2–3 गुना धीमा है, लेकिन औसत अतिरिक्त मेमोरी 35–50% के बजाय लगभग 5% रहती है। अगर मेमोरी थ्रूपुट से ज़्यादा महत्वपूर्ण है तो यह अच्छा सौदा है; वरना std::vector ही रखें।",
+  start_title:"शुरुआत करें", st_cmake:"CMake", st_code:"कोड", st_cli:"अपनी भाषा में टर्मिनल डेमो",
+  copy:"कॉपी करें", copied:"कॉपी हो गया", vs:"बनाम",
+  footer:"MIT लाइसेंस · Anton Sergeev"
+},
+es: {
+  lang_label:"Idioma", title:"Asignador de capacidad adaptativo",
+  tagline:"Un contenedor C++ que decide cuánto crecer: con un flujo denso de inserciones ahorra memoria y con inserciones escasas crece tan rápido como std::vector.",
+  workload:"Carga", elements:"Elementos", run:"Ejecutar",
+  w_steady:"Flujo continuo", w_bursts:"Ráfagas", w_trickle:"Goteo", w_pause:"Flujo con pausa",
+  wd_steady:"Millones de inserciones por segundo sin descanso, como al cargar un archivo grande.",
+  wd_bursts:"Lotes de 5.000 elementos con pausas de 2 ms, como paquetes de mensajes de red.",
+  wd_trickle:"Unas 500 inserciones por segundo, como el registro de eventos de un servicio pequeño.",
+  wd_pause:"Flujo denso, pausa de 2 s y luego inserciones escasas (20 por segundo). Tras la inactividad el contenedor vuelve a crecer de forma agresiva, como std::vector.",
+  legend_size:"ocupado", axis_x:"elementos insertados", axis_y:"capacidad",
+  band:"estrategia de adaptive_vector",
+  t_avg:"Holgura media de memoria", t_final:"Capacidad final", t_realloc:"Reasignaciones", t_copies:"Elementos copiados",
+  simnote:"La simulación ejecuta el mismo algoritmo que la biblioteca sobre un tiempo modelado. Para medir de verdad en su equipo, ejecute acalloc bench.",
+  how_title:"Cómo se elige el crecimiento",
+  how_lead:"Cada vez que el búfer se llena, el contenedor mira a qué velocidad se insertaron los elementos y elige un factor de crecimiento. El reloj se consulta una vez cada 64 inserciones, así que el camino rápido de push_back apenas cuesta más.",
+  s_aggr:"Agresiva", s_mod:"Moderada", s_cons:"Conservadora",
+  s_aggr_d:"Hasta 100 inserciones/s, la primera inserción tras más de 1 s de inactividad y cualquier búfer de menos de 1.024 elementos. Igual que std::vector: el mínimo de reasignaciones.",
+  s_mod_d:"De 100 a 1.000 inserciones/s. Equilibrio entre velocidad y memoria.",
+  s_cons_d:"Más de 1.000 inserciones/s. El búfer crece un 10 %, así que como mucho un 10 % queda sin usar.",
+  feat_title:"Qué incluye",
+  f1:"Sin hilos en segundo plano", f1d:"Ningún hilo auxiliar: diez mil vectores cuestan lo mismo que diez mil std::vector.",
+  f2:"Un solo archivo de cabecera", f2d:"Solo la biblioteca estándar de C++17. Úselo con CMake, find_package o copiando el archivo.",
+  f3:"Telemetría compartida", f3d:"Varios contenedores en distintos hilos pueden compartir un mismo medidor de velocidad sin bloqueos.",
+  f4:"Política configurable", f4d:"Factores, umbrales de velocidad, ventana de medición y umbral de inactividad se definen en growth_policy.",
+  trade_title:"El precio del ahorro",
+  trade:"Crecer un 10 % en lugar de duplicar implica más reasignaciones y copias. Con un flujo continuo de un millón de int el contenedor es unas 2–3 veces más lento que std::vector, pero la holgura media de memoria ronda el 5 % en vez del 35–50 %. Si la memoria importa más que el rendimiento, compensa; si no, siga con std::vector.",
+  start_title:"Primeros pasos", st_cmake:"CMake", st_code:"Código", st_cli:"Demo en la terminal en su idioma",
+  copy:"Copiar", copied:"Copiado", vs:"frente a",
+  footer:"Licencia MIT · Anton Sergeev"
+},
+fr: {
+  lang_label:"Langue", title:"Allocateur de capacité adaptatif",
+  tagline:"Un conteneur C++ qui décide lui-même de combien grandir : sous un flux dense d'insertions il économise la mémoire, avec des insertions rares il grandit aussi vite que std::vector.",
+  workload:"Charge", elements:"Éléments", run:"Lancer",
+  w_steady:"Flux continu", w_bursts:"Rafales", w_trickle:"Filet", w_pause:"Flux avec pause",
+  wd_steady:"Des millions d'insertions par seconde sans interruption, comme le chargement d'un gros fichier.",
+  wd_bursts:"Des lots de 5 000 éléments séparés par des pauses de 2 ms, comme des paquets de messages réseau.",
+  wd_trickle:"Environ 500 insertions par seconde, comme le journal d'événements d'un petit service.",
+  wd_pause:"Un flux dense, une pause de 2 s, puis des insertions rares (20 par seconde). Après l'inactivité, le conteneur grandit de nouveau de façon agressive, comme std::vector.",
+  legend_size:"rempli", axis_x:"éléments insérés", axis_y:"capacité",
+  band:"stratégie d'adaptive_vector",
+  t_avg:"Marge mémoire moyenne", t_final:"Capacité finale", t_realloc:"Réallocations", t_copies:"Éléments copiés",
+  simnote:"La simulation exécute le même algorithme que la bibliothèque sur un temps modélisé. Pour des mesures réelles sur votre machine, lancez acalloc bench.",
+  how_title:"Comment la croissance est choisie",
+  how_lead:"Chaque fois que le tampon est plein, le conteneur regarde à quel rythme les éléments ont été insérés et choisit un facteur de croissance. L'horloge n'est lue qu'une fois toutes les 64 insertions : le chemin rapide de push_back ne coûte presque rien de plus.",
+  s_aggr:"Agressive", s_mod:"Modérée", s_cons:"Conservatrice",
+  s_aggr_d:"Jusqu'à 100 insertions/s, la première insertion après plus de 1 s d'inactivité et tout tampon de moins de 1 024 éléments. Comme std::vector : un minimum de réallocations.",
+  s_mod_d:"De 100 à 1 000 insertions/s. Un équilibre entre vitesse et mémoire.",
+  s_cons_d:"Plus de 1 000 insertions/s. Le tampon grandit de 10 %, donc au plus 10 % reste inutilisé.",
+  feat_title:"Ce qu'il contient",
+  f1:"Aucun thread en arrière-plan", f1d:"Pas le moindre thread auxiliaire : dix mille vecteurs coûtent autant que dix mille std::vector.",
+  f2:"Un seul fichier d'en-tête", f2d:"Seulement la bibliothèque standard C++17. Via CMake, find_package ou une simple copie du fichier.",
+  f3:"Télémétrie partagée", f3d:"Plusieurs conteneurs sur différents threads peuvent partager un même compteur de débit, sans verrou.",
+  f4:"Politique réglable", f4d:"Facteurs, seuils de débit, fenêtre de mesure et seuil d'inactivité se règlent dans growth_policy.",
+  trade_title:"Le prix de l'économie",
+  trade:"Grandir de 10 % au lieu de doubler signifie plus de réallocations et de copies. Sur un flux continu d'un million d'int, le conteneur est environ 2 à 3 fois plus lent que std::vector, mais la marge mémoire moyenne tourne autour de 5 % au lieu de 35 à 50 %. Si la mémoire compte plus que le débit, l'échange est rentable ; sinon, gardez std::vector.",
+  start_title:"Démarrer", st_cmake:"CMake", st_code:"Code", st_cli:"Démo dans le terminal, dans votre langue",
+  copy:"Copier", copied:"Copié", vs:"contre",
+  footer:"Licence MIT · Anton Sergeev"
+},
+de: {
+  lang_label:"Sprache", title:"Adaptiver Kapazitätsallokator",
+  tagline:"Ein C++-Container, der selbst entscheidet, wie stark er wächst: Bei dichtem Einfügestrom spart er Speicher, bei seltenen Einfügungen wächst er so schnell wie std::vector.",
+  workload:"Last", elements:"Elemente", run:"Starten",
+  w_steady:"Kontinuierlicher Strom", w_bursts:"Schübe", w_trickle:"Tröpfeln", w_pause:"Strom mit Pause",
+  wd_steady:"Millionen Einfügungen pro Sekunde ohne Unterbrechung, etwa beim Laden einer großen Datei.",
+  wd_bursts:"Pakete zu 5.000 Elementen mit 2 ms Pause, wie Netzwerknachrichten.",
+  wd_trickle:"Etwa 500 Einfügungen pro Sekunde, wie das Ereignisprotokoll eines kleinen Dienstes.",
+  wd_pause:"Dichter Strom, 2 s Pause, dann seltene Einfügungen (20 pro Sekunde). Nach dem Leerlauf wächst der Container wieder aggressiv, wie std::vector.",
+  legend_size:"belegt", axis_x:"eingefügte Elemente", axis_y:"Kapazität",
+  band:"Strategie von adaptive_vector",
+  t_avg:"Mittlere Speicherreserve", t_final:"Endkapazität", t_realloc:"Umlagerungen", t_copies:"Kopierte Elemente",
+  simnote:"Die Simulation führt denselben Algorithmus wie die Bibliothek auf modellierter Zeit aus. Echte Messungen auf Ihrem Rechner liefert acalloc bench.",
+  how_title:"Wie das Wachstum gewählt wird",
+  how_lead:"Jedes Mal, wenn der Puffer voll ist, prüft der Container, wie schnell Elemente eingefügt wurden, und wählt einen Wachstumsfaktor. Die Uhr wird nur einmal pro 64 Einfügungen gelesen, daher kostet der schnelle Pfad von push_back kaum mehr.",
+  s_aggr:"Aggressiv", s_mod:"Moderat", s_cons:"Konservativ",
+  s_aggr_d:"Bis 100 Einfügungen/s, die erste Einfügung nach mehr als 1 s Leerlauf und jeder Puffer unter 1.024 Elementen. Wie std::vector: möglichst wenige Umlagerungen.",
+  s_mod_d:"100 bis 1.000 Einfügungen/s. Ausgleich zwischen Geschwindigkeit und Speicher.",
+  s_cons_d:"Über 1.000 Einfügungen/s. Der Puffer wächst um 10 %, also bleiben höchstens 10 % ungenutzt.",
+  feat_title:"Was drinsteckt",
+  f1:"Keine Hintergrund-Threads", f1d:"Kein einziger Hilfs-Thread: Zehntausend Vektoren kosten so viel wie zehntausend std::vector.",
+  f2:"Eine einzige Header-Datei", f2d:"Nur die C++17-Standardbibliothek. Einbinden per CMake, find_package oder durch Kopieren der Datei.",
+  f3:"Geteilte Telemetrie", f3d:"Mehrere Container in verschiedenen Threads können sich ohne Sperren einen Ratenzähler teilen.",
+  f4:"Einstellbare Strategie", f4d:"Faktoren, Ratenschwellen, Messfenster und Leerlaufschwelle werden in growth_policy festgelegt.",
+  trade_title:"Der Preis der Ersparnis",
+  trade:"Um 10 % statt aufs Doppelte zu wachsen bedeutet mehr Umlagerungen und Kopien. Bei einem kontinuierlichen Strom von einer Million int ist der Container etwa 2–3-mal langsamer als std::vector, die mittlere Speicherreserve liegt aber bei rund 5 % statt 35–50 %. Wenn Speicher wichtiger ist als Durchsatz, lohnt sich das; sonst bleiben Sie bei std::vector.",
+  start_title:"Loslegen", st_cmake:"CMake", st_code:"Code", st_cli:"Terminal-Demo in Ihrer Sprache",
+  copy:"Kopieren", copied:"Kopiert", vs:"gegenüber",
+  footer:"MIT-Lizenz · Anton Sergeev"
+},
+it: {
+  lang_label:"Lingua", title:"Allocatore di capacità adattivo",
+  tagline:"Un contenitore C++ che decide da solo quanto crescere: con un flusso denso di inserimenti risparmia memoria, con inserimenti rari cresce veloce quanto std::vector.",
+  workload:"Carico", elements:"Elementi", run:"Avvia",
+  w_steady:"Flusso continuo", w_bursts:"Raffiche", w_trickle:"Gocciolamento", w_pause:"Flusso con pausa",
+  wd_steady:"Milioni di inserimenti al secondo senza sosta, come il caricamento di un file grande.",
+  wd_bursts:"Lotti da 5.000 elementi con pause di 2 ms, come pacchetti di messaggi di rete.",
+  wd_trickle:"Circa 500 inserimenti al secondo, come il registro eventi di un piccolo servizio.",
+  wd_pause:"Flusso denso, pausa di 2 s, poi inserimenti rari (20 al secondo). Dopo l'inattività il contenitore torna a crescere in modo aggressivo, come std::vector.",
+  legend_size:"occupato", axis_x:"elementi inseriti", axis_y:"capacità",
+  band:"strategia di adaptive_vector",
+  t_avg:"Margine medio di memoria", t_final:"Capacità finale", t_realloc:"Riallocazioni", t_copies:"Elementi copiati",
+  simnote:"La simulazione esegue lo stesso algoritmo della libreria su un tempo modellato. Per misure reali sulla tua macchina esegui acalloc bench.",
+  how_title:"Come si sceglie la crescita",
+  how_lead:"Ogni volta che il buffer è pieno, il contenitore guarda a che velocità sono stati inseriti gli elementi e sceglie un fattore di crescita. L'orologio viene letto una volta ogni 64 inserimenti, quindi il percorso veloce di push_back costa quasi nulla in più.",
+  s_aggr:"Aggressiva", s_mod:"Moderata", s_cons:"Conservativa",
+  s_aggr_d:"Fino a 100 inserimenti/s, il primo inserimento dopo oltre 1 s di inattività e qualsiasi buffer sotto i 1.024 elementi. Come std::vector: il minimo di riallocazioni.",
+  s_mod_d:"Da 100 a 1.000 inserimenti/s. Un equilibrio tra velocità e memoria.",
+  s_cons_d:"Oltre 1.000 inserimenti/s. Il buffer cresce del 10 %, quindi al massimo il 10 % resta inutilizzato.",
+  feat_title:"Cosa contiene",
+  f1:"Nessun thread in background", f1d:"Nemmeno un thread ausiliario: diecimila vettori costano quanto diecimila std::vector.",
+  f2:"Un solo file header", f2d:"Solo la libreria standard C++17. Si usa con CMake, find_package o copiando il file.",
+  f3:"Telemetria condivisa", f3d:"Più contenitori su thread diversi possono condividere un unico contatore di velocità senza lock.",
+  f4:"Politica configurabile", f4d:"Fattori, soglie di velocità, finestra di misura e soglia di inattività si impostano in growth_policy.",
+  trade_title:"Il prezzo del risparmio",
+  trade:"Crescere del 10 % invece di raddoppiare comporta più riallocazioni e copie. Su un flusso continuo di un milione di int il contenitore è circa 2–3 volte più lento di std::vector, ma il margine medio di memoria è intorno al 5 % invece del 35–50 %. Se la memoria conta più della velocità, conviene; altrimenti resta con std::vector.",
+  start_title:"Per iniziare", st_cmake:"CMake", st_code:"Codice", st_cli:"Demo nel terminale nella tua lingua",
+  copy:"Copia", copied:"Copiato", vs:"contro",
+  footer:"Licenza MIT · Anton Sergeev"
+}
+};
+const LOCALE = { ru:"ru-RU", en:"en-US", zh:"zh-CN", hi:"hi-IN", es:"es-ES", fr:"fr-FR", de:"de-DE", it:"it-IT" };
+
+/* ---------- simulation: same algorithm as include/adaptive/adaptive_allocator.hpp ---------- */
+const POLICY = { aggr:2.0, mod:1.5, cons:1.1, modT:100, highT:1000, windowMs:100, idleMs:1000, minAdaptive:1024, minCap:8, batch:64 };
+
+// Workloads return the insertion time (ms) of element i.
+const WORKLOADS = {
+  steady:  n => i => i / 5000,                                   // 5M/s
+  bursts:  n => i => Math.floor(i / 5000) * 2 + (i % 5000) / 5000, // 5000 @5M/s, then 2 ms pause
+  trickle: n => i => i * 2,                                      // 500/s
+  pause:   n => { const half = Math.floor(n / 2); return i => i < half ? i / 5000 : half / 5000 + 2000 + (i - half) * 50; } // then 20/s
+};
+
+function simulateAdaptive(n, t) {
+  const P = POLICY;
+  let cap = 0, size = 0, pending = 0, total = 0, lastAct = 0, winStart = 0, winBase = 0;
+  let copies = 0, spareSum = 0, usedSum = 0;
+  const pts = [[0, 0]], strat = [];
+  for (let i = 0; i < n; i++) {
+    const now = t(i);
+    pending++;
+    if (size + 1 > cap) {
+      const last = lastAct; lastAct = now;
+      total += pending;
+      const gap = Math.max(now - last, 1e-6);
+      let rate;
+      if (gap > P.idleMs) { rate = pending / gap * 1000; winStart = now; winBase = total; }
+      else {
+        rate = (total - winBase) / Math.max(now - winStart, 1e-6) * 1000;
+        if (now - winStart >= P.windowMs) { winStart = now; winBase = total; }
+      }
+      pending = 0;
+      let s = "aggr";
+      if (cap >= P.minAdaptive) s = rate > P.highT ? "cons" : rate > P.modT ? "mod" : "aggr";
+      let next = Math.floor(cap * P[s]);
+      if (next <= cap) next = cap + 1;
+      next = Math.max(next, size + 1, P.minCap);
+      copies += size;
+      cap = next;
+      pts.push([size, cap]);
+      strat.push([size, s]);
+    } else if (pending >= P.batch) { total += pending; pending = 0; lastAct = now; }
+    size++;
+    spareSum += cap - size; usedSum += size;
+  }
+  return { cap, pts, strat, copies, reallocs: strat.length, avgSpare: usedSum ? 100 * spareSum / usedSum : 0 };
+}
+
+function simulateStd(n) {
+  let cap = 0, copies = 0, spareSum = 0, usedSum = 0, reallocs = 0;
+  const pts = [[0, 0]];
+  for (let size = 0; size < n; size++) {
+    if (size + 1 > cap) { copies += size; cap = cap ? cap * 2 : 1; reallocs++; pts.push([size, cap]); }
+    spareSum += cap - (size + 1); usedSum += size + 1;
+  }
+  return { cap, pts, copies, reallocs, avgSpare: usedSum ? 100 * spareSum / usedSum : 0 };
+}
+
+/* ---------- state & i18n ---------- */
+const $ = id => document.getElementById(id);
+let lang = "ru", workload = "steady", result = null, progress = 1, anim = 0;
+
+function sliderToCount(v) { // 0..100 -> 10k..2M, log scale, rounded nicely
+  const x = 1e4 * Math.pow(200, v / 100);
+  const p = Math.pow(10, Math.floor(Math.log10(x)) - 1);
+  return Math.round(x / p) * p;
+}
+const fmt = (x, d = 0) => new Intl.NumberFormat(LOCALE[lang], { maximumFractionDigits: d, minimumFractionDigits: d }).format(x);
+const tr = k => (T[lang] && T[lang][k]) || T.ru[k] || k;
+
+function pickInitialLang() {
+  const h = (location.hash || "").slice(1);
+  if (T[h]) return h;
+  try { const s = localStorage.getItem("acalloc-lang"); if (T[s]) return s; } catch (e) {}
+  for (const l of (navigator.languages || [navigator.language || ""])) {
+    const c = String(l).slice(0, 2).toLowerCase();
+    if (T[c]) return c;
+  }
+  return "ru";
+}
+
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = tr(el.dataset.i18n); });
+  const seg = $("workloads"); seg.innerHTML = "";
+  for (const w of ["steady", "bursts", "trickle", "pause"]) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = tr("w_" + w); b.setAttribute("aria-pressed", String(w === workload));
+    b.addEventListener("click", () => { workload = w; applyLang(); run(); });
+    seg.appendChild(b);
+  }
+  $("wdesc").textContent = tr("wd_" + workload);
+  $("countv").textContent = fmt(sliderToCount(+$("count").value));
+  $("clicode").textContent = "cmake -S . -B build && cmake --build build\n./build/acalloc --lang " + lang + "\n./build/acalloc bench --lang " + lang;
+  renderTiles(); draw();
+}
+
+/* ---------- rendering ---------- */
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function renderTiles() {
+  if (!result) return;
+  const { a, s } = result;
+  const rows = [
+    ["t_avg", fmt(a.avgSpare, 1) + " %", fmt(s.avgSpare, 1) + " %"],
+    ["t_final", fmt(a.cap), fmt(s.cap)],
+    ["t_realloc", fmt(a.reallocs), fmt(s.reallocs)],
+    ["t_copies", fmt(a.copies), fmt(s.copies)]
+  ];
+  $("tiles").innerHTML = rows.map(([k, av, sv]) =>
+    `<div class="tile"><span class="lbl">${tr(k)}</span>` +
+    `<div class="row"><span class="who ad">adaptive_vector</span><span>${av}</span></div>` +
+    `<div class="row"><span class="who sd">std::vector</span><span>${sv}</span></div></div>`).join("");
+}
+
+function niceTicks(max, count) {
+  const raw = max / count, p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * p).find(s => s >= raw);
+  const out = []; for (let v = 0; v <= max + 1e-9; v += step) out.push(v);
+  return out;
+}
+
+function draw() {
+  const cv = $("chart"); if (!result) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const { a, s, n } = result;
+  const L = 64, R = 12, Tp = 10, band = 14, B = 46;
+  const ph = H - Tp - B - band - 8, pw = W - L - R;
+  const ymax = Math.max(a.cap, s.cap, n) * 1.04;
+  const X = v => L + v / n * pw, Y = v => Tp + ph - v / ymax * ph;
+  const ink = css("--ink"), muted = css("--muted"), line = css("--line");
+  g.font = "11px " + css("--f-mono"); g.fillStyle = muted; g.strokeStyle = line; g.lineWidth = 1;
+  for (const v of niceTicks(ymax, 4)) {
+    if (v > ymax) continue;
+    g.beginPath(); g.moveTo(L, Y(v) + .5); g.lineTo(W - R, Y(v) + .5); g.stroke();
+    g.textAlign = "right"; g.textBaseline = "middle"; g.fillText(compact(v), L - 6, Y(v));
+  }
+  g.textAlign = "center"; g.textBaseline = "top";
+  for (const v of niceTicks(n, W < 500 ? 3 : 5)) { if (v <= n) g.fillText(compact(v), X(v), Tp + ph + band + 12); }
+  g.fillText(tr("axis_x"), L + pw / 2, H - 14);
+  g.save(); g.translate(12, Tp + ph / 2); g.rotate(-Math.PI / 2); g.textBaseline = "middle"; g.fillText(tr("axis_y"), 0, 0); g.restore();
+
+  const lim = n * progress;
+  // size diagonal
+  g.setLineDash([4, 3]); g.strokeStyle = muted; g.lineWidth = 1.5;
+  g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(lim), Y(lim)); g.stroke(); g.setLineDash([]);
+  const step = (pts, color, w) => {
+    g.strokeStyle = color; g.lineWidth = w; g.beginPath();
+    let prevCap = 0; g.moveTo(X(0), Y(0));
+    for (const [sz, cap] of pts) {
+      if (sz > lim) break;
+      g.lineTo(X(sz), Y(prevCap)); g.lineTo(X(sz), Y(cap)); prevCap = cap;
+    }
+    g.lineTo(X(lim), Y(prevCap)); g.stroke();
+  };
+  step(s.pts, css("--std"), 2);
+  step(a.pts, css("--accent"), 2.25);
+  // strategy band
+  const by = Tp + ph + 4, col = { aggr: css("--s-aggr"), mod: css("--s-mod"), cons: css("--s-cons") };
+  for (let i = 0; i < a.strat.length; i++) {
+    const [from, st] = a.strat[i];
+    if (from > lim) break;
+    const to = Math.min(i + 1 < a.strat.length ? a.strat[i + 1][0] : n, lim);
+    g.fillStyle = col[st]; g.fillRect(X(from), by, Math.max(X(to) - X(from), 1), band - 6);
+  }
+}
+
+function compact(v) {
+  return new Intl.NumberFormat(LOCALE[lang], { notation: "compact", maximumFractionDigits: 1 }).format(v);
+}
+
+function run() {
+  const n = sliderToCount(+$("count").value);
+  const t = WORKLOADS[workload](n);
+  result = { n, a: simulateAdaptive(n, t), s: simulateStd(n) };
+  renderTiles();
+  cancelAnimationFrame(anim);
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) { progress = 1; draw(); return; }
+  const t0 = performance.now();
+  progress = 0;
+  const tick = now => { progress = Math.min(1, (now - t0) / 900); draw(); if (progress < 1) anim = requestAnimationFrame(tick); };
+  anim = requestAnimationFrame(tick);
+}
+
+/* ---------- wiring ---------- */
+const sel = $("lang");
+for (const [c, name] of LANGS) { const o = document.createElement("option"); o.value = c; o.textContent = name; sel.appendChild(o); }
+lang = pickInitialLang(); sel.value = lang;
+sel.addEventListener("change", () => { lang = sel.value; try { localStorage.setItem("acalloc-lang", lang); } catch (e) {} applyLang(); });
+$("count").addEventListener("input", () => { $("countv").textContent = fmt(sliderToCount(+$("count").value)); });
+$("count").addEventListener("change", run);
+$("run").addEventListener("click", run);
+document.querySelectorAll(".copy").forEach(btn => btn.addEventListener("click", () => {
+  const text = btn.parentElement.querySelector("code").textContent;
+  const done = () => { btn.textContent = tr("copied"); setTimeout(() => { btn.textContent = tr("copy"); }, 1400); };
+  const fallback = () => { const r = document.createRange(); r.selectNodeContents(btn.parentElement.querySelector("code")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); };
+  try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
+}));
+window.addEventListener("resize", draw);
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", draw);
+new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+result = null;
+applyLang();
+run();
+
+})();
+</script>
+<!--PAGE-END-->
+</body>
+</html>
