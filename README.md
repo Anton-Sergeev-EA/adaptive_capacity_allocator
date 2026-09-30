@@ -1,142 +1,179 @@
-# Adaptive Capacity Allocator
+# Адаптивный распределитель ёмкости
+
+**Русский** · [English](README.en.md) · [中文](README.zh.md) · [हिन्दी](README.hi.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Italiano](README.it.md)
 
 [![CI](https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator/actions/workflows/ci.yml/badge.svg)](https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator/actions/workflows/ci.yml)
-[![C++ Standard](https://img.shields.io/badge/C%2B%2B-17%2F20-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B17)
+[![C++17/20](https://img.shields.io/badge/C%2B%2B-17%2F20-blue.svg)](https://en.cppreference.com/w/cpp/17)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Header-only](https://img.shields.io/badge/header--only-yes-success.svg)](include/adaptive/adaptive_allocator.hpp)
 
-A C++17/20 telemetry-driven allocator and `std::vector` wrapper that picks a
-capacity growth factor at runtime based on measured insertion rate, instead of
-using a single fixed factor (2.0x in GCC/Clang, 1.5x in MSVC) for every
-workload.
+`adaptive_vector` — контейнер C++17, похожий на `std::vector`, который **сам выбирает, насколько расти**,
+по реальной скорости вставки элементов. При плотном потоке вставок он бережёт память, при редких — растёт
+так же быстро, как обычный `std::vector`.
 
-## Architecture & Motivation
+**[Интерактивная демонстрация в браузере →](https://anton-sergeev-ea.github.io/adaptive_capacity_allocator/)** (8 языков)
 
-Standard containers use one hardcoded growth factor regardless of how they are
-used. `adaptive_vector` decouples that decision from the container: a shared
-`allocation_telemetry` object tracks how frequently elements are being
-inserted and picks a growth strategy per reallocation:
+## Зачем это нужно
 
-| Insertion rate       | Strategy               | Growth factor |
-|-----------------------|-------------------------|:---:|
-| Idle (>1s since last insert) or low rate (<100/s) | Aggressive  | 2.0x |
-| Medium rate (100-1000/s, configurable)            | Moderate    | 1.5x |
-| High rate (above the configured threshold)        | Conservative| 1.1x |
+`std::vector` при нехватке места всегда увеличивает буфер в одно и то же число раз: в 2 раза в GCC и Clang,
+в 1,5 раза в MSVC. Это быстро, но после удвоения до половины выделенной памяти может простаивать.
+Для сервисов, которые держат в памяти миллионы буферов (очереди сообщений, журналы, телеметрия,
+биржевые стаканы), эти пустые половины складываются в гигабайты.
 
-## Features
+`adaptive_vector` измеряет, как быстро в него вставляют элементы, и подбирает коэффициент роста под нагрузку:
 
-- **Runtime-adaptive growth** between Conservative (1.1x), Moderate (1.5x),
-  and Aggressive (2.0x), chosen from a rolling-window insertion-rate estimate.
-- **Lock-free telemetry** — atomic counters, no locks on the insertion hot
-  path.
-- **Background idle monitoring** — a worker thread resets stale rate data
-  after a configurable idle period, using `std::condition_variable` rather
-  than a sleep-polling loop.
-- **Over-aligned type support** — safely allocates types requiring alignment
-  greater than `__STDCPP_DEFAULT_NEW_ALIGNMENT__` (e.g. AVX-512/SIMD types)
-  via C++17 `std::align_val_t`.
-- **Header-only, zero dependencies** beyond the standard library and threads.
+| Скорость вставки | Стратегия | Рост |
+|---|---|:---:|
+| до 100 в секунду, первая вставка после простоя, буфер меньше 1 024 элементов | агрессивная | ×2,0 |
+| от 100 до 1 000 в секунду | умеренная | ×1,5 |
+| больше 1 000 в секунду | консервативная | ×1,1 |
 
-## Honest Benchmark Numbers
+Все пороги и коэффициенты настраиваются через `growth_policy`.
 
-*Measured on this machine (Linux x86_64, GCC 13, `-O3`), 1,000,000
-insertions. Run `./adaptive_benchmark` yourself — hardware and compiler
-matter a lot for numbers like these.*
+## Цифры
 
-| Container | Execution Time | Memory Overhead (Capacity/Size) | Final Capacity |
-| :--- | :---: | :---: | :---: |
-| `std::vector<int>` | ~6 ms | 1.049 | 1,048,576 |
-| `adaptive::adaptive_vector<int>` | ~41 ms | **1.017** | 1,017,019 |
+Linux x86_64, GCC 13.3, `-O3`, 1 000 000 вставок `int`, медиана из 5 запусков (`acalloc bench`):
 
-**The trade-off is real, not free.** Under continuous high-rate insertion the
-conservative (1.1x) strategy engages almost immediately and stays engaged,
-which is exactly what it's designed to do — but growing by 10% instead of
-doubling means roughly 7x more reallocations (and therefore ~7x more element
-copies) to reach the same final size. That shows up directly as ~7x slower
-wall-clock time in this benchmark, in exchange for ~3% less capacity overhead.
-Whether that trade is worth it depends entirely on whether your workload is
-memory-constrained or throughput-constrained — this library does not make
-that call for you, it just makes the growth factor adjustable at runtime
-based on measured behavior instead of fixed at compile time.
+| | Время | Средний запас памяти за время заполнения | Перераспределений |
+|---|:---:|:---:|:---:|
+| `std::vector<int>` | ~4,4 мс | 36,4 % | 21 |
+| `adaptive_vector<int>` 2.0 | ~8,8 мс | **5,0 %** | 81 |
+| `adaptive_vector<int>` 1.0 | ~40 мс | 4,9 % | 129 |
 
-For workloads that are genuinely bursty (occasional insertions separated by
-idle periods) rather than sustained-maximum-throughput, the aggressive
-fallback keeps reallocation counts low during the burst itself while the
-telemetry engine watches for sustained high-frequency periods worth trading
-speed for memory on.
+**Цена реальна.** Рост на 10 % вместо удвоения требует больше перераспределений и копирований, поэтому на
+непрерывном потоке контейнер примерно в 2 раза медленнее `std::vector`. Зато лишней памяти в среднем
+около 5 % вместо 35–50 %. Если для вашей задачи память важнее пропускной способности, обмен выгоден;
+если нет, оставьте `std::vector`. Итоговая ёмкость в конкретной точке зависит от того, где остановилось
+заполнение: ровно на 1 000 000 элементов `std::vector` попадает в свой лучший случай (2²⁰), поэтому честное
+сравнение — средний запас за всё время, а не одна последняя точка.
 
-## Quick Start
+Запустите замер у себя — результат зависит от процессора, памяти и компилятора:
 
-### Basic Usage
-
-```cpp
-#include "adaptive_allocator.hpp"
-#include <iostream>
-
-int main() {
-    adaptive::adaptive_vector<int> vec;
-
-    for (int i = 0; i < 100000; ++i) {
-        vec.push_back(i);
-    }
-
-    std::cout << "Size: " << vec.size() << "\n";
-    std::cout << "Capacity: " << vec.capacity() << "\n";
-    std::cout << "Overhead Factor: " << static_cast<double>(vec.capacity()) / vec.size() << "\n";
-
-    return 0;
-}
+```bash
+./build/acalloc bench
 ```
 
-### Integration via CMake
+## Быстрый старт
+
+### Подключение через CMake
 
 ```cmake
 include(FetchContent)
-
-FetchContent_Declare(
-    adaptive_allocator
+FetchContent_Declare(adaptive_allocator
     GIT_REPOSITORY https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator.git
-    GIT_TAG        main
-)
+    GIT_TAG        v2.0.0)
 FetchContent_MakeAvailable(adaptive_allocator)
 
-target_link_libraries(your_target PRIVATE adaptive::allocator)
+target_link_libraries(your_app PRIVATE adaptive::allocator)
 ```
 
-### Building Tests and Benchmarks Manually
+Или после установки (`cmake --install build`):
+
+```cmake
+find_package(AdaptiveAllocator 2 REQUIRED)
+target_link_libraries(your_app PRIVATE adaptive::allocator)
+```
+
+Или просто скопируйте файл [`include/adaptive/adaptive_allocator.hpp`](include/adaptive/adaptive_allocator.hpp) в свой проект:
+он зависит только от стандартной библиотеки.
+
+### Использование
+
+```cpp
+#include <adaptive/adaptive_allocator.hpp>
+#include <iostream>
+
+int main() {
+    adaptive::adaptive_vector<int> v;
+    for (int i = 0; i < 1'000'000; ++i) v.push_back(i);
+
+    const auto s = v.stats();
+    std::cout << "ёмкость: " << s.capacity
+              << ", перераспределений: " << s.reallocations
+              << ", стратегия: " << adaptive::to_string(s.last_strategy) << '\n';
+}
+```
+
+### Своя политика роста
+
+```cpp
+adaptive::growth_policy p;
+p.conservative_factor = 1.25;                    // мягче, чем 1.1
+p.high_threshold = 50'000;                        // консервативно только выше 50 000 вставок/с
+p.idle_reset = std::chrono::milliseconds(500);    // простой — пауза дольше 0,5 с
+adaptive::adaptive_vector<Order> book(p);
+```
+
+### Одна телеметрия на несколько контейнеров
+
+```cpp
+auto shared = std::make_shared<adaptive::allocation_telemetry>();
+adaptive::adaptive_vector<int> a(shared), b(shared);  // решения по суммарной скорости, без блокировок
+```
+
+## Демонстрация в терминале на 8 языках
+
+Программа `acalloc` показывает поведение контейнера на четырёх сценариях: непрерывный поток, всплески,
+медленный ручеёк и поток с паузой. Язык определяется автоматически по языку системы.
 
 ```bash
-git clone https://github.com/Anton-Sergeev-EA/adaptive_capacity_allocator.git
-cd adaptive_capacity_allocator
-
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-make -j$(nproc)
-
-ctest --output-on-failure
-./adaptive_benchmark
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/acalloc                 # демонстрация
+./build/acalloc bench           # сравнение с std::vector
+./build/acalloc languages       # список языков
+./build/acalloc --lang hi       # интерфейс на хинди
 ```
 
-## Debugging with Sanitizers
+Поддерживаемые языки: русский (основной), English, 中文, हिन्दी, Español, Français, Deutsch, Italiano.
+Язык также задаётся переменной окружения `ACALLOC_LANG`. Как добавить язык — в [docs/TRANSLATING.md](docs/TRANSLATING.md).
 
-ASan and TSan instrument incompatible things and cannot be linked into the
-same binary, so this is a three-way choice (`none` / `address` / `thread`),
-not a single on/off switch:
+## API
+
+| Тип | Назначение |
+|---|---|
+| `adaptive_vector<T>` | Контейнер с интерфейсом `std::vector`: `push_back`, `emplace_back`, `insert`, `emplace`, `erase`, `resize`, `assign`, `reserve`, итераторы, сравнения, `swap`, а также `stats()` и `telemetry()` |
+| `growth_policy` | Коэффициенты роста, пороги скорости, окно измерения, порог простоя, минимальная ёмкость для адаптации |
+| `allocation_telemetry` | Потокобезопасный счётчик скорости вставки; можно разделять между контейнерами и потоками |
+| `adaptive_allocator<T>` | Стандартный аллокатор с поддержкой типов с повышенным выравниванием (`alignas(64)` и т. п.) |
+
+Устройство изнутри:
+
+- **Нет фоновых потоков.** Версия 1.0 запускала поток на каждый вектор; 10 000 векторов означали 10 000 потоков.
+- **Часы не опрашиваются на каждой вставке.** Контейнер считает вставки локально и сообщает телеметрии раз
+  в 64 вставки и при каждом решении о росте. Горячий путь `push_back` — один счётчик и два сравнения.
+- **Простой распознаётся.** Если вставок не было дольше `idle_reset`, старая статистика забывается, и первая
+  же вставка после паузы приводит к агрессивному росту.
+
+## Сборка, тесты и проверки
 
 ```bash
-# AddressSanitizer + UndefinedBehaviorSanitizer
-cmake -DADAPTIVE_SANITIZER=address -DCMAKE_BUILD_TYPE=Debug ..
-make -j$(nproc) && ./adaptive_tests
-
-# ThreadSanitizer (this library's whole point is concurrent telemetry, so
-# this is the more important one to run when touching allocation_telemetry)
-cmake -DADAPTIVE_SANITIZER=thread -DCMAKE_BUILD_TYPE=Debug ..
-make -j$(nproc) && ./adaptive_tests
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-## License
+Санитайзеры (ASan и TSan нельзя собрать в один файл, поэтому это выбор из трёх вариантов):
 
-Distributed under the MIT License — see [LICENSE](LICENSE) for details.
+```bash
+cmake -S . -B build-asan -DADAPTIVE_SANITIZER=address -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build-tsan -DADAPTIVE_SANITIZER=thread  -DCMAKE_BUILD_TYPE=Debug
+```
+
+Сборка в Docker с GCC и Clang описана в [docker/README.md](docker/README.md).
+CI проверяет Linux (GCC и Clang, Debug и Release, C++17 и C++20), macOS, Windows (MSVC),
+оба санитайзера и форматирование.
+
+## Что нового
+
+Полный список изменений — в [CHANGELOG.md](CHANGELOG.md). Код версии 1.0 (`#include "adaptive_allocator.hpp"`,
+конструктор `allocation_telemetry(idle_ms, window_ms, threshold)`, `compute_capacity`, `record_insertion`)
+продолжает компилироваться без изменений.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).
 
 ---
 
-Anton Sergeev — avsergeev1981@gmail.com
+Антон Сергеев — avsergeev1981@gmail.com
