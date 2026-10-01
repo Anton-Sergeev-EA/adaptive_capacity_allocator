@@ -7,95 +7,114 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
-    name: ${{ matrix.compiler }} / ${{ matrix.build_type }}
+  linux:
+    name: Linux ${{ matrix.compiler }} / ${{ matrix.build_type }} / C++${{ matrix.std }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         compiler: [gcc, clang]
         build_type: [Debug, Release]
+        std: [17, 20]
         include:
           - compiler: gcc
-            cc: gcc-13
             cxx: g++-13
           - compiler: clang
-            cc: clang-18
             cxx: clang++-18
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Configure
         env:
-          CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-          -DADAPTIVE_BUILD_TESTS=ON
-          -DADAPTIVE_BUILD_BENCHMARKS=ON
-
+          -DCMAKE_CXX_STANDARD=${{ matrix.std }}
       - name: Build
         run: cmake --build build --parallel
-
       - name: Test
-        working-directory: build
-        run: ctest --output-on-failure --parallel
+        run: ctest --test-dir build --output-on-failure
+      - name: Demo in every language
+        run: |
+          for lang in ru en zh hi es fr de it; do
+            ./build/acalloc demo --lang "$lang" --elements 50000
+          done
+
+  macos:
+    name: macOS (Apple Clang)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
 
   sanitizers:
-    name: ${{ matrix.sanitizer }} sanitizer (clang, Debug)
+    name: ${{ matrix.sanitizer }} sanitizer
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # Deliberately run address (ASan+UBSan) and thread (TSan) separately -
-        # GCC/Clang cannot link ASan and TSan into the same binary, and mixing
-        # UBSan into a TSan build produces sanitizer-runtime-internal races
-        # unrelated to this project's code (see CMakeLists.txt).
+        # ASan (+UBSan) and TSan cannot share one binary, so they run separately.
         sanitizer: [address, thread]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
       - name: Configure
         env:
-          CC: clang-18
           CXX: clang++-18
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
-          -DADAPTIVE_BUILD_TESTS=ON
-          -DADAPTIVE_BUILD_BENCHMARKS=OFF
           -DADAPTIVE_SANITIZER=${{ matrix.sanitizer }}
-
       - name: Build
         run: cmake --build build --parallel
-
       - name: Test under sanitizer
-        working-directory: build
-        run: ctest --output-on-failure --parallel
+        run: ctest --test-dir build --output-on-failure
+
+  install:
+    name: Install and find_package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the library
+        run: |
+          cmake -S . -B build -DADAPTIVE_BUILD_TESTS=OFF -DADAPTIVE_BUILD_APPS=OFF -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/prefix"
+          cmake --install build
+      - name: Consume it
+        run: |
+          mkdir consumer && cd consumer
+          printf '%s\n' 'cmake_minimum_required(VERSION 3.14)' 'project(consumer CXX)' \
+            'find_package(AdaptiveAllocator 2 REQUIRED)' 'add_executable(c main.cpp)' \
+            'target_link_libraries(c PRIVATE adaptive::allocator)' > CMakeLists.txt
+          printf '%s\n' '#include <adaptive/adaptive_allocator.hpp>' \
+            'int main() { adaptive::adaptive_vector<int> v; v.push_back(1); return v.size() == 1 ? 0 : 1; }' > main.cpp
+          cmake -S . -B build -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          cmake --build build
+          ./build/c
 
   format-check:
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Check formatting
-        run: |
-          find . -name '*.hpp' -o -name '*.cpp' | \
-            xargs clang-format-18 --dry-run --Werror
+        run: find . -name '*.hpp' -o -name '*.cpp' | xargs clang-format-18 --dry-run --Werror

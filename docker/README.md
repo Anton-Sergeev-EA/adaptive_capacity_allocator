@@ -17,10 +17,11 @@ docker run --rm -it hello-u1604 bash        # внутри доступны g++,
 docker build -f docker/Dockerfile.gcc   -t adaptive-allocator:gcc   .
 docker build -f docker/Dockerfile.clang -t adaptive-allocator:clang .
 
-docker run --rm adaptive-allocator:gcc            # тесты + бенчмарк
+docker run --rm adaptive-allocator:gcc                      # тесты + демонстрация
 docker run --rm adaptive-allocator:clang
-docker run --rm adaptive-allocator:clang tests    # только тесты
-docker run --rm adaptive-allocator:gcc benchmark  # только алгоритм/бенчмарк
+docker run --rm adaptive-allocator:clang tests              # только тесты
+docker run --rm adaptive-allocator:gcc benchmark            # сравнение с std::vector
+docker run --rm adaptive-allocator:gcc demo --lang en       # демонстрация на нужном языке
 ```
 
 Почему проект собирается не на Ubuntu 16.04: там gcc 5.4 и CMake 3.5, а проекту нужны
