@@ -1,17 +1,9 @@
-# Docker: сборка gcc и clang
+# Docker
 
-## Задание 1 — Ubuntu 16.04 + gcc + редактор, «Hello world»
+## Сборка и запуск проекта с GCC и Clang
 
-```bash
-docker build -t hello-u1604 docker/hello
-docker run --rm hello-u1604                 # -> Hello, world! (built with g++ 5.4.0 ...)
-docker run --rm -it hello-u1604 bash        # внутри доступны g++, nano, vim
-```
-
-## Задание 2 — проект в контейнерах с gcc и clang
-
-Сборка запускается из корня репозитория (контекст — `.`). Тесты (`ctest`) выполняются
-прямо на этапе сборки образа: если они не проходят, образ не соберётся.
+Образы собираются из корня репозитория (контекст — `.`). Тесты (`ctest`) выполняются
+прямо на этапе сборки: если они не проходят, образ не соберётся.
 
 ```bash
 docker build -f docker/Dockerfile.gcc   -t adaptive-allocator:gcc   .
@@ -24,13 +16,23 @@ docker run --rm adaptive-allocator:gcc benchmark            # сравнение
 docker run --rm adaptive-allocator:gcc demo --lang en       # демонстрация на нужном языке
 ```
 
-Почему проект собирается не на Ubuntu 16.04: там gcc 5.4 и CMake 3.5, а проекту нужны
-C++17 (`if constexpr`, `std::align_val_t`) и CMake ≥ 3.14. Поэтому для задания 2 используется Ubuntu 24.04
-(gcc 13, clang 18).
+Образы основаны на Ubuntu 24.04 (GCC 13, Clang 18). Проекту нужны C++17
+(`if constexpr`, `std::align_val_t`) и CMake 3.14 или новее.
 
-## Что пришлось исправить для clang
+## Минимальное окружение C++ на Ubuntu 16.04
 
-`adaptive_allocator.hpp` вызывал sized `operator delete(void*, size_t)`. GCC включает
-sized deallocation по умолчанию, а Clang до 19-й версии — только с `-fsized-deallocation`,
-поэтому под clang сборка падала с `no matching function for call to 'operator delete'`.
-Вызов теперь обёрнут в проверку `__cpp_sized_deallocation`, с откатом на обычный `operator delete`.
+Отдельный образ `docker/hello` — минимальная среда с GCC 5.4, nano и vim, которая собирает
+консольную программу «Hello, world». Сам проект в нём не собирается: GCC 5.4 и CMake 3.5
+слишком старые для C++17.
+
+```bash
+docker build -t hello-u1604 docker/hello
+docker run --rm hello-u1604                 # -> Hello, world! (built with g++ 5.4.0 ...)
+docker run --rm -it hello-u1604 bash        # внутри доступны g++, nano, vim
+```
+
+## Совместимость с Clang
+
+Sized `operator delete(void*, size_t)` GCC включает по умолчанию, а Clang до 19-й версии —
+только с `-fsized-deallocation`. Поэтому вызов в `include/adaptive/adaptive_allocator.hpp`
+обёрнут в проверку `__cpp_sized_deallocation` с откатом на обычный `operator delete`.
